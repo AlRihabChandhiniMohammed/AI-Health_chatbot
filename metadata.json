@@ -1,0 +1,6 @@
+{
+  "name": "AI Health Assistant",
+  "description": "A comprehensive modern healthcare platform containing virtual clinical assistants, interactive symptom checking indexes, maps directories for local clinics and pharmacies, speech-to-hearing Voice AI module, multilingual scripts, and dashboard analytics.",
+  "requestFramePermissions": ["geolocation", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

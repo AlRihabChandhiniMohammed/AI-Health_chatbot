@@ -1,0 +1,186 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net - Default Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Hardened Helper Functions ---
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Entity Specific Validation Blueprints (Anti-Update-Gaps) ---
+
+    function isValidUser(data) {
+      return data.uid == request.auth.uid
+        && data.email is string
+        && data.email.size() <= 128
+        && (data.displayName == null || (data.displayName is string && data.displayName.size() <= 128))
+        && (data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 500))
+        && (data.language == null || data.language in ['en', 'hi', 'te'])
+        && data.createdAt == request.time;
+    }
+
+    function isValidChat(data) {
+      return data.id is string
+        && data.id.size() <= 128
+        && data.userId == request.auth.uid
+        && data.title is string
+        && data.title.size() <= 200
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    function isValidMessage(data) {
+      return data.id is string
+        && data.id.size() <= 128
+        && data.text is string
+        // Limit individual conversational message to 8KB
+        && data.text.size() <= 8000
+        && data.sender in ['user', 'model']
+        && data.createdAt == request.time;
+    }
+
+    function isValidSymptomCheck(data) {
+      return data.id is string
+        && data.id.size() <= 128
+        && data.userId == request.auth.uid
+        && data.symptoms is string
+        && data.symptoms.size() <= 2000
+        && data.age is int
+        && data.age >= 0
+        && data.age <= 150
+        && data.gender in ['Male', 'Female', 'Other']
+        && data.duration is string
+        && data.duration.size() <= 100
+        && data.severity in ['Mild', 'Moderate', 'Severe']
+        && data.results is string
+        && data.results.size() <= 30000
+        && data.createdAt == request.time;
+    }
+
+    function isValidSavedDoctor(data) {
+      return data.id is string
+        && data.id.size() <= 128
+        && data.userId == request.auth.uid
+        && data.doctorId is string
+        && data.doctorId.size() <= 128
+        && data.doctorName is string
+        && data.doctorName.size() <= 150
+        && data.specialization is string
+        && data.specialization.size() <= 150
+        && (data.experience == null || data.experience is int)
+        && (data.rating == null || data.rating is number)
+        && (data.hospitalAffiliation == null || (data.hospitalAffiliation is string && data.hospitalAffiliation.size() <= 200))
+        && (data.availability == null || (data.availability is string && data.availability.size() <= 150))
+        && (data.consultationFee == null || data.consultationFee is int)
+        && data.createdAt == request.time;
+    }
+
+    function isValidSavedHospital(data) {
+      return data.id is string
+        && data.id.size() <= 128
+        && data.userId == request.auth.uid
+        && data.hospitalId is string
+        && data.hospitalId.size() <= 128
+        && data.name is string
+        && data.name.size() <= 200
+        && (data.rating == null || data.rating is number)
+        && (data.address == null || (data.address is string && data.address.size() <= 300))
+        && (data.phone == null || (data.phone is string && data.phone.size() <= 50))
+        && (data.website == null || (data.website is string && data.website.size() <= 300))
+        && data.createdAt == request.time;
+    }
+
+    // --- Firestore Collection Match Clauses ---
+
+    // 1. Users Collection (PII Isolated and Strictly Limited to Owner Access)
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && incoming().createdAt == existing().createdAt
+        && incoming().email == existing().email
+        // We only allow user updates for selected fields (Language or profile info modification)
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'language'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['language'])
+        );
+      allow delete: if isOwner(userId);
+    }
+
+    // 2. Chat Threads Metadata
+    match /chats/{chatId} {
+      allow get: if isSignedIn() && isOwner(existing().userId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(chatId) && isValidChat(incoming());
+      allow update: if isSignedIn()
+        && isOwner(existing().userId)
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        // Update either only titles or timestamp
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'updatedAt'])
+        && incoming().updatedAt == request.time;
+      allow delete: if isSignedIn() && isOwner(existing().userId);
+
+      // 3. Child Messages Collection (Relational Access / Master Gate Pattern)
+      match /messages/{messageId} {
+        allow get: if isSignedIn() && get(/databases/$(database)/documents/chats/$(chatId)).data.userId == request.auth.uid;
+        allow list: if isSignedIn() && get(/databases/$(database)/documents/chats/$(chatId)).data.userId == request.auth.uid;
+        allow create: if isSignedIn()
+          && isValidId(messageId)
+          && get(/databases/$(database)/documents/chats/$(chatId)).data.userId == request.auth.uid
+          && isValidMessage(incoming());
+        // Messages are clinically unmodifiable after timestamp submission
+        allow update, delete: if false;
+      }
+    }
+
+    // 4. Clinical Symptom Checks
+    match /symptomChecks/{checkId} {
+      allow get: if isSignedIn() && isOwner(existing().userId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(checkId) && isValidSymptomCheck(incoming());
+      allow update, delete: if isSignedIn() && isOwner(existing().userId);
+    }
+
+    // 5. Shortlisted Saved Doctors
+    match /savedDoctors/{saveId} {
+      allow get: if isSignedIn() && isOwner(existing().userId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(saveId) && isValidSavedDoctor(incoming());
+      allow update: if isSignedIn() && isOwner(existing().userId) && incoming().createdAt == existing().createdAt;
+      allow delete: if isSignedIn() && isOwner(existing().userId);
+    }
+
+    // 6. Shortlisted Saved Hospitals
+    match /savedHospitals/{saveId} {
+      allow get: if isSignedIn() && isOwner(existing().userId);
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(saveId) && isValidSavedHospital(incoming());
+      allow update: if isSignedIn() && isOwner(existing().userId) && incoming().createdAt == existing().createdAt;
+      allow delete: if isSignedIn() && isOwner(existing().userId);
+    }
+  }
+}
