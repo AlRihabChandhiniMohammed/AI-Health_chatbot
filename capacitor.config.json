@@ -1,0 +1,5 @@
+{
+  "appId": "com.aihealth.app",
+  "appName": "AI Health Assistant",
+  "webDir": "dist"
+}
