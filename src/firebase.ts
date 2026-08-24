@@ -16,7 +16,7 @@ const isConfigReal =
 
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
-let auth: Auth | null = null;
+let _auth: Auth | null = null;
 
 if (isConfigReal) {
   try {
@@ -24,7 +24,7 @@ if (isConfigReal) {
     db = initializeFirestore(app, {
       experimentalForceLongPolling: true,
     }, firebaseConfig.firestoreDatabaseId);
-    auth = getAuth();
+    _auth = getAuth();
   } catch (e) {
     console.warn("Firebase init failed:", e);
   }
@@ -32,27 +32,29 @@ if (isConfigReal) {
   console.warn("Firebase not configured. Running in demo mode.");
 }
 
-// Create a mock auth so components don't crash when auth is null
-const mockAuth = {
-  currentUser: null as any,
-  app: null as any,
-  name: "[mock]",
-  config: {} as any,
-  languageCode: null,
-  tenantId: null,
-  _canInitEmulator: () => false,
-  _updatePercentSanitizedUserIndex: () => {},
-  _removeUserFromIndex: () => {},
-  _setUserIndex: () => {},
-  _onStorageEventManager: { addEventListener: () => {}, removeEventListener: () => {} },
-  _persistLocalStoreEventTarget: null,
-} as unknown as Auth;
+// Safe auth proxy: exposes currentUser without Firebase SDK internals
+// This prevents crashes in components that access auth.currentUser
+export const auth = new Proxy({} as any, {
+  get(_target, prop) {
+    if (prop === "currentUser") {
+      // Return guest user if set, otherwise real auth user or null
+      const guest = (globalThis as any).__guestUser;
+      return guest ?? _auth?.currentUser ?? null;
+    }
+    if (prop === "__esModule" || prop === "default") return undefined;
+    if (_auth && typeof (_auth as any)[prop] === "function") {
+      return (_auth as any)[prop].bind(_auth);
+    }
+    return undefined;
+  }
+});
+
+// Real Firebase Auth for SDK functions (onAuthStateChanged, signIn, etc.)
+// Only available when Firebase is configured
+export const realAuth = _auth;
 
 export { db };
-export const authProxy = auth || mockAuth;
-// Also export as `auth` for backward compatibility with all existing imports
-export { authProxy as auth };
-export const isFirebaseReady = isConfigReal && !!auth;
+export const isFirebaseReady = isConfigReal && !!_auth;
 
 export enum OperationType {
   CREATE = 'create',
@@ -80,11 +82,11 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: authProxy.currentUser?.uid ?? null,
-      email: authProxy.currentUser?.email ?? null,
-      emailVerified: authProxy.currentUser?.emailVerified ?? null,
-      isAnonymous: authProxy.currentUser?.isAnonymous ?? null,
-      tenantId: authProxy.currentUser?.tenantId ?? null,
+      userId: auth.currentUser?.uid ?? null,
+      email: auth.currentUser?.email ?? null,
+      emailVerified: auth.currentUser?.emailVerified ?? null,
+      isAnonymous: auth.currentUser?.isAnonymous ?? null,
+      tenantId: auth.currentUser?.tenantId ?? null,
     },
     operationType,
     path

@@ -12,7 +12,7 @@ import {
 import { 
   HeartPulse, ShieldCheck, Mail, Lock, User, Loader2, Sparkles, AlertCircle 
 } from "lucide-react";
-import { auth } from "./firebase";
+import { auth, realAuth, isFirebaseReady } from "./firebase";
 import Layout from "./components/Layout";
 import LandingView from "./components/LandingView";
 import DashboardOverview from "./components/DashboardOverview";
@@ -48,12 +48,8 @@ export default function App() {
     if (storedGuest) {
       try {
         const parsedGuest = JSON.parse(storedGuest);
-        if (auth) {
-          Object.defineProperty(auth, "currentUser", {
-            get: () => parsedGuest,
-            configurable: true
-          });
-        }
+        // Store guest user globally so auth proxy returns it
+        (globalThis as any).__guestUser = parsedGuest;
         setUser(parsedGuest);
         setAuthLoading(false);
         return;
@@ -63,12 +59,12 @@ export default function App() {
     }
 
     // If Firebase auth is not available, skip auth listener
-    if (!auth) {
+    if (!isFirebaseReady) {
       setAuthLoading(false);
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(realAuth!, (currentUser) => {
       if (!localStorage.getItem("health_locker_guest_user")) {
         setUser(currentUser);
         setAuthLoading(false);
@@ -97,15 +93,10 @@ export default function App() {
     
     // Persist this guest user details in localStorage
     localStorage.setItem("health_locker_guest_user", JSON.stringify(guestUser));
-    
-    // Handshake simulated auth
-    if (auth) {
-      Object.defineProperty(auth, "currentUser", {
-        get: () => guestUser,
-        configurable: true
-      });
-    }
-    
+
+    // Store guest user globally so auth proxy returns it
+    (globalThis as any).__guestUser = guestUser;
+
     setUser(guestUser);
     setAuthError("");
     setAuthLoading(false);
@@ -116,6 +107,12 @@ export default function App() {
     e.preventDefault();
     setAuthError("");
     setAuthSubmitting(true);
+
+    if (!isFirebaseReady) {
+      setAuthError("Firebase is not configured. Please use Guest mode.");
+      setAuthSubmitting(false);
+      return;
+    }
 
     if (!email || !password) {
       setAuthError("Please fill in email and password credentials");
@@ -131,14 +128,12 @@ export default function App() {
 
     try {
       if (isSignUp) {
-        // Sign up workflow
-        const credentials = await createUserWithEmailAndPassword(auth, email, password);
+        const credentials = await createUserWithEmailAndPassword(realAuth!, email, password);
         if (name) {
           await updateProfile(credentials.user, { displayName: name });
         }
       } else {
-        // Sign in workflow
-        await signInWithEmailAndPassword(auth, email, password);
+        await signInWithEmailAndPassword(realAuth!, email, password);
       }
     } catch (err: any) {
       console.error("Firebase authentication error: ", err);
@@ -164,8 +159,13 @@ export default function App() {
     setAuthError("");
     setAuthSubmitting(true);
     try {
+      if (!isFirebaseReady) {
+        setAuthError("Firebase is not configured. Please use Guest mode.");
+        setAuthSubmitting(false);
+        return;
+      }
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      await signInWithPopup(realAuth!, provider);
     } catch (err: any) {
       console.error("Firebase Google Auth error: ", err);
       if (err.code === "auth/operation-not-allowed") {
