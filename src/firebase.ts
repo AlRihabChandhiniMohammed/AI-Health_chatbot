@@ -8,14 +8,12 @@ import { getAuth, type Auth } from "firebase/auth";
 import { initializeFirestore, type Firestore, doc, getDocFromServer } from "firebase/firestore";
 import firebaseConfig from "../firebase-applet-config.json";
 
-// Check if config has real values (not placeholders)
 const isConfigReal =
   firebaseConfig.apiKey &&
   !firebaseConfig.apiKey.startsWith("YOUR_") &&
   firebaseConfig.projectId &&
   !firebaseConfig.projectId.startsWith("YOUR_");
 
-// Initialize Firebase only with real config
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
@@ -31,10 +29,29 @@ if (isConfigReal) {
     console.warn("Firebase init failed:", e);
   }
 } else {
-  console.warn("Firebase config contains placeholder values. Running in offline/demo mode.");
+  console.warn("Firebase not configured. Running in demo mode.");
 }
 
-export { db, auth };
+// Create a mock auth so components don't crash when auth is null
+const mockAuth = {
+  currentUser: null as any,
+  app: null as any,
+  name: "[mock]",
+  config: {} as any,
+  languageCode: null,
+  tenantId: null,
+  _canInitEmulator: () => false,
+  _updatePercentSanitizedUserIndex: () => {},
+  _removeUserFromIndex: () => {},
+  _setUserIndex: () => {},
+  _onStorageEventManager: { addEventListener: () => {}, removeEventListener: () => {} },
+  _persistLocalStoreEventTarget: null,
+} as unknown as Auth;
+
+export { db };
+export const authProxy = auth || mockAuth;
+// Also export as `auth` for backward compatibility with all existing imports
+export { authProxy as auth };
 export const isFirebaseReady = isConfigReal && !!auth;
 
 export enum OperationType {
@@ -63,11 +80,11 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth?.currentUser?.uid ?? null,
-      email: auth?.currentUser?.email ?? null,
-      emailVerified: auth?.currentUser?.emailVerified ?? null,
-      isAnonymous: auth?.currentUser?.isAnonymous ?? null,
-      tenantId: auth?.currentUser?.tenantId ?? null,
+      userId: authProxy.currentUser?.uid ?? null,
+      email: authProxy.currentUser?.email ?? null,
+      emailVerified: authProxy.currentUser?.emailVerified ?? null,
+      isAnonymous: authProxy.currentUser?.isAnonymous ?? null,
+      tenantId: authProxy.currentUser?.tenantId ?? null,
     },
     operationType,
     path

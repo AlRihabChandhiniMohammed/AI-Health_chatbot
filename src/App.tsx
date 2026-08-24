@@ -48,16 +48,24 @@ export default function App() {
     if (storedGuest) {
       try {
         const parsedGuest = JSON.parse(storedGuest);
-        Object.defineProperty(auth, "currentUser", {
-          get: () => parsedGuest,
-          configurable: true
-        });
+        if (auth) {
+          Object.defineProperty(auth, "currentUser", {
+            get: () => parsedGuest,
+            configurable: true
+          });
+        }
         setUser(parsedGuest);
         setAuthLoading(false);
         return;
       } catch (e) {
         localStorage.removeItem("health_locker_guest_user");
       }
+    }
+
+    // If Firebase auth is not available, skip auth listener
+    if (!auth) {
+      setAuthLoading(false);
+      return;
     }
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -91,10 +99,12 @@ export default function App() {
     localStorage.setItem("health_locker_guest_user", JSON.stringify(guestUser));
     
     // Handshake simulated auth
-    Object.defineProperty(auth, "currentUser", {
-      get: () => guestUser,
-      configurable: true
-    });
+    if (auth) {
+      Object.defineProperty(auth, "currentUser", {
+        get: () => guestUser,
+        configurable: true
+      });
+    }
     
     setUser(guestUser);
     setAuthError("");
