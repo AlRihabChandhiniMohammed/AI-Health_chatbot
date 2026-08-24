@@ -6,14 +6,7 @@
 import { initializeApp, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
 import { initializeFirestore, type Firestore, doc, getDocFromServer } from "firebase/firestore";
-
-// Load config - works with both real and placeholder values
-let firebaseConfig: any;
-try {
-  firebaseConfig = require("../firebase-applet-config.json");
-} catch {
-  firebaseConfig = {};
-}
+import firebaseConfig from "../firebase-applet-config.json";
 
 // Check if config has real values (not placeholders)
 const isConfigReal =
@@ -41,7 +34,6 @@ if (isConfigReal) {
   console.warn("Firebase config contains placeholder values. Running in offline/demo mode.");
 }
 
-// Export mock auth for demo mode if real auth unavailable
 export { db, auth };
 export const isFirebaseReady = isConfigReal && !!auth;
 
@@ -85,7 +77,6 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-// Test connection only if Firebase is configured
 async function testConnection() {
   if (!db) return;
   try {
